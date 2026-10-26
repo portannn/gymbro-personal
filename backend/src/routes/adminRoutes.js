@@ -16,6 +16,10 @@ const {
   deleteSupplement,
   getAllExercises,
   createExercise,
+  updateExercise,
+  deleteExercise,
+  getWorkoutExercises,
+  setWorkoutExercises,
   updateExerciseMedia,
 } = require('../controllers/adminController');
 
@@ -30,6 +34,8 @@ router.get('/workouts', verifyToken, getAllWorkouts);
 router.post('/workouts', verifyToken, createWorkout);
 router.put('/workouts/:id', verifyToken, updateWorkout);
 router.delete('/workouts/:id', verifyToken, deleteWorkout);
+router.get('/workouts/:id/exercises', verifyToken, getWorkoutExercises);
+router.put('/workouts/:id/exercises', verifyToken, setWorkoutExercises);
 
 // ─── Supplements (Products) ──────────────────────────────────────────────────
 router.get('/supplements', verifyToken, getAllSupplements);
@@ -40,6 +46,8 @@ router.delete('/supplements/:id', verifyToken, deleteSupplement);
 // ─── Exercises ───────────────────────────────────────────────────────────────
 router.get('/exercises', verifyToken, getAllExercises);
 router.post('/exercises', verifyToken, createExercise);
+router.put('/exercises/:id', verifyToken, updateExercise);
+router.delete('/exercises/:id', verifyToken, deleteExercise);
 
 // Exercise Media Upload (Multipart)
 router.post('/exercises/:id/media', verifyToken, upload.single('media_file'), async (req, res, next) => {

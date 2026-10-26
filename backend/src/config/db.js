@@ -8,9 +8,10 @@ const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  ssl: {
-    ca: fs.readFileSync(path.join(__dirname, 'ca.pem')),
-  },
+  // SSL hanya untuk database cloud (mis. Aiven); matikan untuk MySQL lokal/Docker
+  ssl: process.env.DB_SSL === 'true'
+    ? { ca: fs.readFileSync(path.join(__dirname, 'ca.pem')) }
+    : undefined,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,

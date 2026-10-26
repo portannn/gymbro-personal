@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/supplement_provider.dart';
-import 'providers/exercise_upload_provider.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
@@ -20,7 +19,6 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => SupplementProvider()),
-        ChangeNotifierProvider(create: (_) => ExerciseUploadProvider()),
       ],
       child: const GymbroApp(),
     ),

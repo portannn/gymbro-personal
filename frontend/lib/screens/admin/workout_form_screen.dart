@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../models/admin_exercise_model.dart';
 import '../../utils/admin_colors.dart';
 import '../../models/workout_model.dart';
 import '../../services/admin_service.dart';
@@ -24,15 +25,22 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   late final TextEditingController _durationCtrl;
   late final TextEditingController _caloriesCtrl;
 
+  // Latihan di dalam workout (urutan list = urutan tampil)
+  final List<_WorkoutExerciseLink> _links = [];
+  List<AdminExercise> _allExercises = [];
+  bool _exercisesLoading = true;
+  // Hanya kirim daftar latihan jika berhasil dimuat, supaya gagal-muat tidak menghapus data
+  bool _linksReady = false;
+
   // Dropdown selections
   String _difficulty = 'Beginner';
   String _locationType = 'Gym';
-  String _category = 'Strength';
+  String _category = 'Workout';
   String _fitnessGoal = '';
 
   static const _difficulties = ['Beginner', 'Intermediate', 'Advanced'];
   static const _locationTypes = ['Gym', 'Home', 'Anywhere'];
-  static const _categories = ['Strength', 'Cardio', 'Flexibility', 'HIIT', 'Yoga', 'Other'];
+  static const _categories = ['Workout', 'Warmup'];
   static const _fitnessGoals = ['', 'Weight Loss', 'Muscle Gain', 'Maintenance', 'Endurance'];
 
   @override
@@ -45,10 +53,60 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     _caloriesCtrl = TextEditingController(text: w?.caloriesBurned?.toStringAsFixed(0) ?? '');
 
     if (w != null) {
-      _difficulty = _difficulties.contains(w.difficulty) ? w.difficulty : 'Beginner';
-      _locationType = _locationTypes.contains(w.locationType) ? w.locationType : 'Gym';
-      _category = _categories.contains(w.category) ? w.category : 'Strength';
-      _fitnessGoal = _fitnessGoals.contains(w.fitnessGoal ?? '') ? (w.fitnessGoal ?? '') : '';
+      // Backend menyimpan lowercase; cocokkan tanpa peduli huruf besar/kecil
+      String pick(List<String> options, String? value, String fallback) => options.firstWhere(
+            (o) => o.toLowerCase() == (value ?? '').toLowerCase(),
+            orElse: () => fallback,
+          );
+      _difficulty = pick(_difficulties, w.difficulty, 'Beginner');
+      _locationType = pick(_locationTypes, w.locationType, 'Gym');
+      _category = pick(_categories, w.category, 'Workout');
+      _fitnessGoal = pick(_fitnessGoals, w.fitnessGoal, '');
+    }
+    _loadExercises();
+  }
+
+  Future<void> _loadExercises() async {
+    final all = await _adminService.getExercises();
+    final linked = widget.workout == null
+        ? {'success': true, 'data': <dynamic>[]}
+        : await _adminService.getWorkoutExercises(widget.workout!.id);
+    if (!mounted) return;
+
+    if (all['success'] == true) {
+      _allExercises = (all['data'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(AdminExercise.fromJson)
+          .toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    }
+    if (linked['success'] == true) {
+      for (final row in (linked['data'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>()) {
+        _links.add(_WorkoutExerciseLink(
+          exerciseId: row['exercise_id'].toString(),
+          name: (row['name'] ?? '').toString(),
+          reps: (row['reps_or_duration'] ?? '').toString(),
+        ));
+      }
+    }
+    setState(() {
+      _linksReady = all['success'] == true && linked['success'] == true;
+      _exercisesLoading = false;
+    });
+  }
+
+  Future<void> _addExercise() async {
+    final usedIds = _links.map((l) => l.exerciseId).toSet();
+    final available = _allExercises.where((e) => !usedIds.contains(e.id)).toList();
+
+    final picked = await showModalBottomSheet<AdminExercise>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AdminColors.cardColor,
+      builder: (ctx) => _ExercisePickerSheet(exercises: available),
+    );
+    if (picked != null) {
+      setState(() => _links.add(_WorkoutExerciseLink(exerciseId: picked.id, name: picked.name, reps: '')));
     }
   }
 
@@ -58,6 +116,9 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     _descriptionCtrl.dispose();
     _durationCtrl.dispose();
     _caloriesCtrl.dispose();
+    for (final l in _links) {
+      l.repsCtrl.dispose();
+    }
     super.dispose();
   }
 
@@ -87,13 +148,27 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     }
 
     if (!mounted) return;
+
+    String? linkError;
+    if (result['success'] == true && _linksReady) {
+      final workoutId = (result['data'] as Workout).id;
+      final linkResult = await _adminService.setWorkoutExercises(
+        workoutId,
+        _links.map((l) => {'exercise_id': l.exerciseId, 'reps_or_duration': l.repsCtrl.text.trim()}).toList(),
+      );
+      if (linkResult['success'] != true) linkError = linkResult['message']?.toString() ?? 'Gagal menyimpan latihan';
+    }
+
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (result['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(isEditing ? 'Workout berhasil diperbarui!' : 'Workout berhasil ditambahkan!'),
-          backgroundColor: Colors.green,
+          content: Text(linkError != null
+              ? 'Workout tersimpan, tapi daftar latihan gagal: $linkError'
+              : (isEditing ? 'Workout berhasil diperbarui!' : 'Workout berhasil ditambahkan!')),
+          backgroundColor: linkError != null ? Colors.orange : Colors.green,
         ),
       );
       // Return true so the caller knows to refresh its list
@@ -226,6 +301,9 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 24),
+
+              _buildExercisesSection(),
               const SizedBox(height: 32),
 
               // Save button
@@ -252,6 +330,103 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildExercisesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Latihan dalam workout',
+                style: TextStyle(color: AdminColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: (_exercisesLoading || _allExercises.isEmpty) ? null : _addExercise,
+              icon: const Icon(Icons.add, color: AdminColors.accentColor, size: 18),
+              label: const Text('Tambah', style: TextStyle(color: AdminColors.accentColor)),
+            ),
+          ],
+        ),
+        if (_exercisesLoading)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator(color: AdminColors.accentColor)),
+          )
+        else if (!_linksReady)
+          const Text(
+            'Gagal memuat daftar latihan. Daftar latihan tidak akan diubah saat menyimpan.',
+            style: TextStyle(color: Colors.orange, fontSize: 13),
+          )
+        else if (_links.isEmpty)
+          const Text(
+            'Belum ada latihan. Tekan Tambah untuk memilih dari master data.',
+            style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
+          )
+        else
+          ReorderableListView(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            onReorder: (oldIndex, newIndex) {
+              setState(() {
+                if (newIndex > oldIndex) newIndex -= 1;
+                _links.insert(newIndex, _links.removeAt(oldIndex));
+              });
+            },
+            children: [
+              for (var i = 0; i < _links.length; i++)
+                Card(
+                  key: ValueKey(_links[i].exerciseId),
+                  color: AdminColors.cardColor,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    child: Row(
+                      children: [
+                        ReorderableDragStartListener(
+                          index: i,
+                          child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.drag_handle, color: AdminColors.textSecondary),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            '${i + 1}. ${_links[i].name}',
+                            style: const TextStyle(color: AdminColors.textPrimary),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: _links[i].repsCtrl,
+                            style: const TextStyle(color: AdminColors.textPrimary, fontSize: 13),
+                            decoration: const InputDecoration(
+                              hintText: '3 x 12 / 30 sec',
+                              hintStyle: TextStyle(color: AdminColors.textSecondary, fontSize: 12),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
+                          tooltip: 'Hapus dari workout',
+                          onPressed: () => setState(() => _links.removeAt(i).repsCtrl.dispose()),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+      ],
     );
   }
 
@@ -333,6 +508,78 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
           )
           .toList(),
       onChanged: onChanged,
+    );
+  }
+}
+
+class _WorkoutExerciseLink {
+  _WorkoutExerciseLink({required this.exerciseId, required this.name, required String reps})
+      : repsCtrl = TextEditingController(text: reps);
+
+  final String exerciseId;
+  final String name;
+  final TextEditingController repsCtrl;
+}
+
+class _ExercisePickerSheet extends StatefulWidget {
+  const _ExercisePickerSheet({required this.exercises});
+  final List<AdminExercise> exercises;
+
+  @override
+  State<_ExercisePickerSheet> createState() => _ExercisePickerSheetState();
+}
+
+class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.exercises.where((e) => e.name.toLowerCase().contains(_query.toLowerCase())).toList();
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.7,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  autofocus: true,
+                  style: const TextStyle(color: AdminColors.textPrimary),
+                  onChanged: (v) => setState(() => _query = v),
+                  decoration: const InputDecoration(
+                    hintText: 'Cari latihan...',
+                    hintStyle: TextStyle(color: AdminColors.textSecondary),
+                    prefixIcon: Icon(Icons.search, color: AdminColors.textSecondary),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(
+                        child: Text('Tidak ada latihan tersedia.', style: TextStyle(color: AdminColors.textSecondary)),
+                      )
+                    : ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, i) {
+                          final e = filtered[i];
+                          return ListTile(
+                            title: Text(e.name, style: const TextStyle(color: AdminColors.textPrimary)),
+                            subtitle: Text(
+                              e.equipmentRequired.isEmpty ? 'MET ${e.metValue}' : '${e.equipmentRequired} - MET ${e.metValue}',
+                              style: const TextStyle(color: AdminColors.textSecondary, fontSize: 12),
+                            ),
+                            onTap: () => Navigator.pop(context, e),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

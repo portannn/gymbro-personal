@@ -78,18 +78,22 @@ async function runMetMigration() {
       { met: 4.0,  patterns: ['%hip thrust%', '%glute bridge%'] },
     ];
 
-    let totalUpdated = 0;
-    for (const seed of metSeeds) {
-      for (const pattern of seed.patterns) {
-        const [result] = await pool.query(
-          'UPDATE exercises SET met_value = ? WHERE LOWER(name) LIKE ?',
-          [seed.met, pattern]
-        );
-        totalUpdated += result.affectedRows;
+    // Hanya saat kolom baru dibuat. Jika dijalankan di setiap start, nilai MET yang
+    // diedit admin akan tertimpa kembali oleh pola nama di atas.
+    if (columns.length === 0) {
+      let totalUpdated = 0;
+      for (const seed of metSeeds) {
+        for (const pattern of seed.patterns) {
+          const [result] = await pool.query(
+            'UPDATE exercises SET met_value = ? WHERE LOWER(name) LIKE ?',
+            [seed.met, pattern]
+          );
+          totalUpdated += result.affectedRows;
+        }
       }
-    }
 
-    console.log(`✅ Migration: seed MET selesai. Total baris diperbarui: ${totalUpdated}.`);
+      console.log(`✅ Migration: seed MET selesai. Total baris diperbarui: ${totalUpdated}.`);
+    }
 
     // ─── STEP 3: Verifikasi ─────────────────────────────────────────────────────
     const [rows] = await pool.query(

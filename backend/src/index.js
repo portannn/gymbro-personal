@@ -57,7 +57,10 @@ const start = async () => {
   try {
     await testConnection();
     
-    // Jalankan migrasi tabel
+    // Jalankan migrasi tabel (users harus pertama: tabel lain punya FK ke users)
+    const { runUsersMigration } = require('./config/migrate_users');
+    await runUsersMigration();
+
     const { runMigration } = require('./config/migrate_history');
     await runMigration();
     
